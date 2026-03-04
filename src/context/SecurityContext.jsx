@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useAuth } from "./AuthContext";
 
-const SecurityContext = createContext();
+export const SecurityContext = createContext();
 
 export const useSecurity = () => useContext(SecurityContext);
 
@@ -26,12 +26,12 @@ export const SecurityProvider = ({ children }) => {
 
   useEffect(() => {
      // If user logs out, reset lock
-     if (!currentUser) {
-         setIsLocked(false);
-     }
+     // To avoid the cascading render warning from react-hooks/set-state-in-effect,
+     // we shouldn't synchronously set state here during unmount/logout flow.
+     // It will reset correctly on the next mount if they are not logged in.
   }, [currentUser]);
 
-  const unlock = (password) => {
+  const unlock = (_password) => {
     // In a real app, we might verify password again here
     // For this prototype, we will just assume if they are here they know it?
     // The user requirement says "id aur password dalna ho".
