@@ -55,9 +55,6 @@ const LockScreen = () => {
             {loading ? "Unlocking..." : "Unlock"}
           </button>
         </form>
-        <div className="mt-4 text-center">
-             <p className="text-sm text-gray-500">Logged in as {currentUser?.email}</p>
-        </div>
       </div>
     </div>
   );
