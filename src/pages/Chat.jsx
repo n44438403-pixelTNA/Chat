@@ -107,7 +107,10 @@ const Chat = () => {
           if (msg.senderId !== currentUser.uid && !msg.seen) {
              try {
                 const msgRef = doc(db, "chats", chatId, "messages", msg.id);
-                await updateDoc(msgRef, { seen: true });
+                await updateDoc(msgRef, {
+                  seen: true,
+                  seenAt: Timestamp.now()
+                });
              } catch (e) {
                  console.error("Error marking seen:", e);
              }
@@ -266,17 +269,23 @@ const Chat = () => {
                                  </button>
                              )}
 
-                            <div className={`text-xs ${isMe ? "text-blue-200" : "text-gray-400"}`}>
-                                {isMe && (
-                                    <span>
-                                        {msg.seen ? (
-                                            <span className="text-green-300 font-bold">✓✓</span>
-                                        ) : (
-                                            <span>✓</span>
-                                        )}
-                                    </span>
-                                )}
-                            </div>
+                        </div>
+
+                        <div className={`text-[10px] mt-1 flex justify-end gap-2 items-center ${isMe ? "text-blue-200" : "text-gray-400"}`}>
+                            <span>
+                                {msg.createdAt && new Date(msg.createdAt.toMillis()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                            </span>
+                            {isMe && (
+                                <span className="flex items-center gap-1">
+                                    {msg.seen ? (
+                                        <span className="text-green-300 font-bold" title={msg.seenAt ? `Seen at ${new Date(msg.seenAt.toMillis()).toLocaleTimeString()}` : "Seen"}>
+                                            ✓✓ {msg.seenAt && <span className="text-[9px] font-normal">({new Date(msg.seenAt.toMillis()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})</span>}
+                                        </span>
+                                    ) : (
+                                        <span title="Delivered">✓</span>
+                                    )}
+                                </span>
+                            )}
                         </div>
                     </div>
                 </div>
