@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { db, storage } from "../firebase";
+import { db, storage, rtdb } from "../firebase";
 import {
   collection,
   addDoc,
@@ -10,13 +10,12 @@ import {
   Timestamp,
   updateDoc,
   doc,
-  where,
   deleteDoc,
-  getDocs,
   setDoc,
   getDoc
 } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { ref as rtdbRef, onValue } from "firebase/database";
 import { useAuth } from "../context/AuthContext";
 import { v4 as uuidv4 } from "uuid";
 
@@ -25,10 +24,11 @@ const Chat = () => {
   const { currentUser } = useAuth();
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
-  const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState(0);
   const [wallpaperUrl, setWallpaperUrl] = useState("");
+  const [otherUser, setOtherUser] = useState(null);
+  const [presence, setPresence] = useState(null);
+  const [replyingTo, setReplyingTo] = useState(null);
   const navigate = useNavigate();
   const bottomRef = useRef(null);
 
@@ -38,6 +38,23 @@ const Chat = () => {
     : `${userId}-${currentUser.uid}`;
 
   useEffect(() => {
+    const fetchOtherUser = async () => {
+      const userDocRef = doc(db, "users", userId);
+      const userDoc = await getDoc(userDocRef);
+      if (userDoc.exists()) {
+        setOtherUser(userDoc.data());
+      }
+    };
+    fetchOtherUser();
+
+    // Listen to other user's presence
+    const userStatusRef = rtdbRef(rtdb, `/status/${userId}`);
+    const unsubscribePresence = onValue(userStatusRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setPresence(snapshot.val());
+      }
+    });
+
     // Fetch chat wallpaper
     const fetchChatMetadata = async () => {
         const chatDocRef = doc(db, "chats", chatId);
@@ -47,6 +64,7 @@ const Chat = () => {
         }
     };
     fetchChatMetadata();
+
     // Listen for changes to chat metadata (wallpaper)
     const unsubscribeChat = onSnapshot(doc(db, "chats", chatId), (doc) => {
         if (doc.exists() && doc.data().wallpaperUrl) {
@@ -62,9 +80,26 @@ const Chat = () => {
 
     const unsubscribeMsgs = onSnapshot(q, (snapshot) => {
       const msgs = [];
-      snapshot.forEach((doc) => {
-        msgs.push({ id: doc.id, ...doc.data() });
+      const now = Date.now();
+      const twentyFourHours = 24 * 60 * 60 * 1000;
+
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const msgTime = data.createdAt ? data.createdAt.toMillis() : now;
+
+        // Check if message is older than 24 hours
+        if (now - msgTime > twentyFourHours && !data.saved) {
+            // Delete message if older than 24h and not saved
+            try {
+                deleteDoc(doc(db, "chats", chatId, "messages", docSnap.id));
+            } catch (e) {
+                console.error("Error auto-deleting old message:", e);
+            }
+        } else {
+            msgs.push({ id: docSnap.id, ...data });
+        }
       });
+
       setMessages(msgs);
       
       // Mark unseen messages as seen immediately upon loading or receiving
@@ -83,106 +118,48 @@ const Chat = () => {
     return () => {
         unsubscribeChat();
         unsubscribeMsgs();
+        unsubscribePresence();
     };
-  }, [chatId, currentUser.uid]);
+  }, [chatId, currentUser.uid, userId]);
 
-  // Handle "Disappearing Messages" on unmount / navigate back
-  useEffect(() => {
-     return () => {
-         const deleteSeenMessages = async () => {
-             try {
-                // Query for messages sent to me that are seen AND NOT SAVED
-                // We will fetch seen messages and client-side filter for 'saved' status
-                const qSeen = query(
-                    collection(db, "chats", chatId, "messages"),
-                    where("senderId", "==", userId), // Message from the other person
-                    where("seen", "==", true)
-                );
-                
-                const snapshot = await getDocs(qSeen);
-                const deletionPromises = [];
-                snapshot.forEach((d) => {
-                    const data = d.data();
-                    if (!data.saved) {
-                        deletionPromises.push(deleteDoc(d.ref));
-                    }
-                });
-                await Promise.all(deletionPromises);
-             } catch (error) {
-                 console.error("Error deleting seen messages:", error);
-             }
-         };
-         deleteSeenMessages();
-     }
-  }, [chatId, userId]); 
-  
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   const handleSend = async (e) => {
     e.preventDefault();
-    if (!text && !file) return;
+    if (!text) return;
 
     setLoading(true);
-    setUploadProgress(0);
 
     try {
-      let url = null;
-      let type = "text";
-
-      if (file) {
-        const fileRef = ref(storage, `chat/${chatId}/${uuidv4()}`);
-        const uploadTask = uploadBytesResumable(fileRef, file);
-
-        uploadTask.on('state_changed', 
-          (snapshot) => {
-            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-            setUploadProgress(progress);
-          }, 
-          (error) => {
-             console.error("Upload failed", error);
-             setLoading(false);
-          }, 
-          async () => {
-            url = await getDownloadURL(uploadTask.snapshot.ref);
-            type = file.type.startsWith("image/") ? "image" : "video";
-            
-            await sendMessage(text, url, type);
-            setLoading(false);
-            setUploadProgress(0);
-            setText("");
-            setFile(null);
-          }
-        );
-        return; // Return here as async task continues in callback
-      } else {
-          await sendMessage(text, null, "text");
-          setText("");
-          setLoading(false);
-      }
+      await sendMessage(text);
+      setText("");
+      setLoading(false);
     } catch (err) {
       console.error(err);
       setLoading(false);
     }
   };
 
-  const sendMessage = async (msgText, mediaUrl, msgType) => {
-      await addDoc(collection(db, "chats", chatId, "messages"), {
+  const sendMessage = async (msgText) => {
+      const payload = {
         text: msgText,
         senderId: currentUser.uid,
         createdAt: Timestamp.now(),
         seen: false,
         saved: false,
-        ...(mediaUrl && { url: mediaUrl, type: msgType }),
-      });
-  };
-  
-  const handleFileChange = (e) => {
-      if (e.target.files[0]) {
-          setFile(e.target.files[0]);
+      };
+
+      if (replyingTo) {
+        payload.replyToId = replyingTo.id;
+        payload.replyToText = replyingTo.text;
+        payload.replyToSenderId = replyingTo.senderId;
       }
-  }
+
+      await addDoc(collection(db, "chats", chatId, "messages"), payload);
+      setReplyingTo(null);
+  };
 
   const handleWallpaperChange = async (e) => {
       const wallpaperFile = e.target.files[0];
@@ -224,7 +201,18 @@ const Chat = () => {
             <button onClick={() => navigate(-1)} className="mr-4 font-bold text-xl">
             &larr;
             </button>
-            <h1 className="text-lg font-bold">Chat</h1>
+            <div className="flex flex-col">
+              <h1 className="text-lg font-bold">
+                {otherUser ? otherUser.displayName || otherUser.email : "Chat"}
+              </h1>
+              {presence && (
+                <span className="text-xs text-blue-200">
+                  {presence.state === "online"
+                    ? "Online"
+                    : `Last seen: ${presence.last_changed ? new Date(presence.last_changed).toLocaleString() : "offline"}`}
+                </span>
+              )}
+            </div>
         </div>
         <div className="relative overflow-hidden">
              <label className="cursor-pointer text-xs bg-blue-700 hover:bg-blue-800 px-3 py-1 rounded flex items-center">
@@ -238,17 +226,26 @@ const Chat = () => {
         {messages.map((msg) => {
             const isMe = msg.senderId === currentUser.uid;
             return (
-                <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"} group`}>
-                    <div className={`max-w-xs md:max-w-md p-3 rounded-lg relative ${isMe ? "bg-blue-500 text-white" : "bg-white text-gray-800"}`}>
-                        {msg.type === "image" && (
-                            <img src={msg.url} alt="Shared" className="rounded mb-2 max-h-64 object-cover" />
-                        )}
-                        {msg.type === "video" && (
-                            <video src={msg.url} controls className="rounded mb-2 max-h-64" />
+                <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"} group mb-2`}>
+                    <div className={`max-w-xs md:max-w-md p-3 rounded-lg relative ${isMe ? "bg-blue-500 text-white" : "bg-white text-gray-800 shadow"}`}>
+                        {msg.replyToText && (
+                            <div className={`mb-2 p-2 rounded text-xs ${isMe ? "bg-blue-600 text-blue-100" : "bg-gray-100 text-gray-600"} border-l-4 ${isMe ? "border-blue-300" : "border-blue-500"}`}>
+                                <p className="font-semibold">{msg.replyToSenderId === currentUser.uid ? "You" : (otherUser ? otherUser.displayName || "User" : "User")}</p>
+                                <p className="truncate">{msg.replyToText}</p>
+                            </div>
                         )}
                         {msg.text && <p>{msg.text}</p>}
                         
                         <div className="flex items-center justify-end mt-1 gap-2">
+                             {/* Reply Button */}
+                             <button
+                                onClick={() => setReplyingTo(msg)}
+                                className={`text-xs ${isMe ? "text-blue-200 hover:text-white" : "text-gray-400 hover:text-gray-600"} opacity-0 group-hover:opacity-100 transition-opacity`}
+                                title="Reply"
+                             >
+                                 Reply
+                             </button>
+
                              {/* Save Button */}
                              <button 
                                 onClick={() => toggleSave(msg.id, msg.saved)}
@@ -288,19 +285,17 @@ const Chat = () => {
         <div ref={bottomRef} />
       </div>
 
+      {replyingTo && (
+        <div className="bg-gray-200 p-2 flex items-center justify-between text-sm z-10 relative">
+            <div className="truncate flex-1 pr-4 border-l-4 border-blue-500 pl-2">
+                <span className="font-semibold text-blue-600 text-xs block">Replying to {replyingTo.senderId === currentUser.uid ? "yourself" : (otherUser ? otherUser.displayName || "user" : "user")}</span>
+                <span className="text-gray-600 text-xs">{replyingTo.text}</span>
+            </div>
+            <button onClick={() => setReplyingTo(null)} className="text-gray-500 hover:text-gray-800 font-bold p-1">✕</button>
+        </div>
+      )}
+
       <form onSubmit={handleSend} className="p-4 bg-white border-t flex items-center gap-2 z-10 relative">
-         <label className="cursor-pointer text-gray-500 hover:text-blue-600">
-             <input type="file" className="hidden" onChange={handleFileChange} accept="image/*,video/*" />
-             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
-                <path strokeLinecap="round" strokeLinejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
-             </svg>
-         </label>
-         {file && (
-             <div className="text-xs bg-gray-200 px-2 py-1 rounded flex items-center">
-                 {file.name.substring(0, 10)}...
-                 <button type="button" onClick={() => setFile(null)} className="ml-1 text-red-500 font-bold">x</button>
-             </div>
-         )}
          <input 
             type="text" 
             value={text} 
@@ -308,14 +303,14 @@ const Chat = () => {
             placeholder="Type a message..."
             className="flex-1 border rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-blue-600"
          />
-         <button type="submit" disabled={loading} className="bg-blue-600 text-white p-2 rounded-full hover:bg-blue-700 disabled:opacity-50 min-w-[40px] flex justify-center">
-             {loading && uploadProgress > 0 ? (
-                 <span className="text-xs font-bold">{Math.round(uploadProgress)}%</span>
-             ) : (
+         <button type="submit" disabled={loading || !text} className="bg-blue-600 text-white p-2 rounded-full hover:bg-blue-700 disabled:opacity-50 min-w-[40px] flex justify-center">
+            {loading ? (
+                <span className="text-xs font-bold">...</span>
+            ) : (
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
                 </svg>
-             )}
+            )}
          </button>
       </form>
     </div>

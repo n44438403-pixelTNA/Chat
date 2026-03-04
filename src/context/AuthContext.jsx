@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { auth, db } from "../firebase";
+import { auth, db, rtdb } from "../firebase";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -7,8 +7,9 @@ import {
   onAuthStateChanged,
 } from "firebase/auth";
 import { setDoc, doc } from "firebase/firestore";
+import { ref, onValue, onDisconnect, set, serverTimestamp } from "firebase/database";
 
-const AuthContext = createContext();
+export const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
 
@@ -32,18 +33,53 @@ export const AuthProvider = ({ children }) => {
     return signInWithEmailAndPassword(auth, email, password);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    if (currentUser) {
+      const userStatusDatabaseRef = ref(rtdb, '/status/' + currentUser.uid);
+      await set(userStatusDatabaseRef, {
+        state: 'offline',
+        last_changed: serverTimestamp(),
+      });
+    }
     return signOut(auth);
   };
 
   useEffect(() => {
+    let connectedRefUnsubscribe;
+
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setLoading(false);
+
+      if (user) {
+        const userStatusDatabaseRef = ref(rtdb, '/status/' + user.uid);
+        const isOfflineForDatabase = {
+          state: 'offline',
+          last_changed: serverTimestamp(),
+        };
+        const isOnlineForDatabase = {
+          state: 'online',
+          last_changed: serverTimestamp(),
+        };
+
+        const connectedRef = ref(rtdb, '.info/connected');
+        connectedRefUnsubscribe = onValue(connectedRef, (snap) => {
+          if (snap.val() === true) {
+            onDisconnect(userStatusDatabaseRef).set(isOfflineForDatabase).then(() => {
+              set(userStatusDatabaseRef, isOnlineForDatabase);
+            });
+          }
+        });
+      }
     });
 
-    return unsubscribe;
-  }, []);
+    return () => {
+      unsubscribe();
+      if (connectedRefUnsubscribe) {
+        connectedRefUnsubscribe(); // Assuming onValue returns an unsubscribe function (it does in modular SDK)
+      }
+    };
+  }, [currentUser]);
 
   const value = {
     currentUser,
