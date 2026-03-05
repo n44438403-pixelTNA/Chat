@@ -252,8 +252,36 @@ const Chat = () => {
       }
 
       await addDoc(collection(db, "chats", chatId, "messages"), payload);
+
       if (!isDraft) {
           setReplyingTo(null);
+
+          const wordCount = msgText.trim().split(/\s+/).length;
+
+          try {
+             // Update Sender Stats (Messages Sent & Words)
+             const senderRef = doc(db, "users", currentUser.uid);
+             const senderDoc = await getDoc(senderRef);
+             if (senderDoc.exists()) {
+                 const currentData = senderDoc.data();
+                 await updateDoc(senderRef, {
+                     messageCount: (currentData.messageCount || 0) + 1,
+                     wordCount: (currentData.wordCount || 0) + wordCount
+                 });
+             }
+
+             // Update Receiver Stats (Messages Received)
+             const receiverRef = doc(db, "users", userId);
+             const receiverDoc = await getDoc(receiverRef);
+             if (receiverDoc.exists()) {
+                 const currentData = receiverDoc.data();
+                 await updateDoc(receiverRef, {
+                     messagesReceived: (currentData.messagesReceived || 0) + 1
+                 });
+             }
+          } catch (e) {
+             console.error("Error updating user stats:", e);
+          }
       }
   };
 
@@ -319,7 +347,11 @@ const Chat = () => {
             <button onClick={() => navigate(-1)} className="mr-4 font-bold text-xl">
             &larr;
             </button>
-            <div className="flex flex-col">
+            <div
+                className="flex flex-col cursor-pointer hover:bg-blue-700 px-2 py-1 rounded transition-colors"
+                onClick={() => navigate(`/profile/${userId}`)}
+                title="View Profile"
+            >
               <h1 className="text-lg font-bold">
                 {otherUser ? otherUser.displayName || otherUser.email : "Chat"}
               </h1>

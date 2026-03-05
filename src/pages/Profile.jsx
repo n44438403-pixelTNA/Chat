@@ -3,12 +3,14 @@ import { useParams, useNavigate } from "react-router-dom";
 import { db, auth } from "../firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { useAuth } from "../context/AuthContext";
+import { useSecurity } from "../context/SecurityContext";
 import { updateEmail, updatePassword, updateProfile as updateAuthProfile } from "firebase/auth";
 
 const Profile = () => {
   const { userId } = useParams();
   const navigate = useNavigate();
   const { currentUser } = useAuth();
+  const { lockTime, updateLockTime } = useSecurity();
   const [profileUser, setProfileUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -180,6 +182,25 @@ const Profile = () => {
                     />
                 </div>
 
+                <hr className="my-2" />
+                <h3 className="font-semibold text-gray-800">App Security</h3>
+
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Auto-Lock Time</label>
+                    <select
+                        value={lockTime}
+                        onChange={(e) => updateLockTime(Number(e.target.value))}
+                        className="w-full px-3 py-2 border rounded focus:ring-1 focus:ring-blue-600 focus:outline-none bg-white"
+                    >
+                        <option value={0}>Instant (Default)</option>
+                        <option value={5}>5 Minutes</option>
+                        <option value={10}>10 Minutes</option>
+                        <option value={30}>30 Minutes</option>
+                        <option value={-1}>Never</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">App will lock when left in the background for this duration.</p>
+                </div>
+
                 <div className="flex gap-2 mt-4">
                     <button type="submit" className="flex-1 bg-blue-600 text-white py-2 rounded font-semibold hover:bg-blue-700">Save Changes</button>
                     <button type="button" onClick={() => setIsEditing(false)} className="flex-1 bg-gray-200 text-gray-800 py-2 rounded font-semibold hover:bg-gray-300">Cancel</button>
@@ -204,16 +225,20 @@ const Profile = () => {
                 <h2 className="text-2xl font-bold text-gray-800 mb-1">{profileUser.displayName || "Unknown User"}</h2>
                 <p className="text-gray-500 text-sm mb-6">{profileUser.email}</p>
 
-                <div className="w-full bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <div className="w-full bg-gray-50 rounded-lg p-4 border border-gray-200 mt-4">
                     <h3 className="text-lg font-semibold text-gray-700 mb-3 border-b pb-2">Chat Stats</h3>
-                    <div className="grid grid-cols-2 gap-4 text-center">
-                        <div className="bg-white p-3 rounded shadow-sm border border-gray-100">
-                            <p className="text-sm text-gray-500 uppercase tracking-wide">Messages</p>
-                            <p className="text-2xl font-bold text-blue-600">{profileUser.messageCount || 0}</p>
+                    <div className="grid grid-cols-3 gap-3 text-center">
+                        <div className="bg-white p-2 rounded shadow-sm border border-gray-100">
+                            <p className="text-xs text-gray-500 uppercase tracking-wide">Sent</p>
+                            <p className="text-xl font-bold text-blue-600">{profileUser.messageCount || 0}</p>
                         </div>
-                        <div className="bg-white p-3 rounded shadow-sm border border-gray-100">
-                            <p className="text-sm text-gray-500 uppercase tracking-wide">Words Sent</p>
-                            <p className="text-2xl font-bold text-green-600">{profileUser.wordCount || 0}</p>
+                        <div className="bg-white p-2 rounded shadow-sm border border-gray-100">
+                            <p className="text-xs text-gray-500 uppercase tracking-wide">Received</p>
+                            <p className="text-xl font-bold text-purple-600">{profileUser.messagesReceived || 0}</p>
+                        </div>
+                        <div className="bg-white p-2 rounded shadow-sm border border-gray-100">
+                            <p className="text-xs text-gray-500 uppercase tracking-wide">Words</p>
+                            <p className="text-xl font-bold text-green-600">{profileUser.wordCount || 0}</p>
                         </div>
                     </div>
                 </div>
