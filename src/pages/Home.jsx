@@ -76,11 +76,12 @@ const Home = () => {
     <div className="min-h-screen bg-gray-100">
       <header className="bg-blue-600 p-4 text-white flex justify-between items-center shadow-md">
         <h1 className="text-xl font-bold">Chats</h1>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <Link to={`/profile/${currentUser?.uid}`} className="bg-blue-500 px-3 py-1.5 rounded text-sm hover:bg-blue-400 transition-colors">My Profile</Link>
           {isAdmin && (
-            <Link to="/settings" className="bg-blue-700 px-4 py-2 rounded text-sm hover:bg-blue-800 transition-colors">Settings</Link>
+            <Link to="/settings" className="bg-blue-700 px-3 py-1.5 rounded text-sm hover:bg-blue-800 transition-colors">Settings</Link>
           )}
-          <button onClick={logout} className="bg-red-500 px-4 py-2 rounded text-sm hover:bg-red-600 transition-colors">Logout</button>
+          <button onClick={logout} className="bg-red-500 px-3 py-1.5 rounded text-sm hover:bg-red-600 transition-colors">Logout</button>
         </div>
       </header>
       <main className="p-4">
