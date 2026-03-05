@@ -7,6 +7,7 @@ import Signup from './pages/Signup';
 import LockScreen from './pages/LockScreen';
 import Home from './pages/Home';
 import Chat from './pages/Chat';
+import Settings from './pages/Settings';
 
 // Protected Route Component
 const ProtectedRoute = ({ children }) => {
@@ -40,6 +41,11 @@ const App = () => {
             <Route path="/chat/:userId" element={
               <ProtectedRoute>
                 <Chat />
+              </ProtectedRoute>
+            } />
+            <Route path="/settings" element={
+              <ProtectedRoute>
+                <Settings />
               </ProtectedRoute>
             } />
           </Routes>
