@@ -16,11 +16,7 @@ const Login = () => {
       setError("");
       setLoading(true);
       await login(email, password);
-      if (email.toLowerCase() === "nadimanwar794@gmail.com") {
-        navigate("/settings");
-      } else {
-        navigate("/");
-      }
+      navigate("/");
     } catch (err) {
       setError("Failed to log in: " + err.message);
     }

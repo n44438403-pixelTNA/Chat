@@ -12,8 +12,12 @@ export const SecurityProvider = ({ children }) => {
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        // App went to background or tab switched
+        // App went to background or tab switched. Hide body and lock.
+        document.body.style.display = 'none';
         setIsLocked(true);
+      } else {
+        // App is visible again. Show body. It will be on the lock screen because isLocked is true.
+        document.body.style.display = 'block';
       }
     };
 
@@ -21,6 +25,7 @@ export const SecurityProvider = ({ children }) => {
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.body.style.display = 'block'; // cleanup
     };
   }, []);
 
