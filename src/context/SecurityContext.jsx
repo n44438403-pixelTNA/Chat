@@ -7,17 +7,42 @@ export const useSecurity = () => useContext(SecurityContext);
 
 export const SecurityProvider = ({ children }) => {
   const { currentUser } = useAuth();
+  // We initialize to true initially so it locks on first load for protection
   const [isLocked, setIsLocked] = useState(true);
 
+  // Default to 0 (Instant) if not set. Other options: 5, 10, 30 (minutes), -1 (Never)
+  const [lockTime, setLockTime] = useState(() => {
+    const saved = localStorage.getItem("autoLockTime");
+    return saved !== null ? parseInt(saved, 10) : 0;
+  });
+
   useEffect(() => {
+    let timeoutId;
+
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        // App went to background or tab switched. Hide body and lock.
-        document.body.style.display = 'none';
-        setIsLocked(true);
+        // App went to background or tab switched.
+        if (lockTime === -1) {
+          // Never lock
+          return;
+        } else if (lockTime === 0) {
+          // Instant lock
+          document.body.style.display = 'none';
+          setIsLocked(true);
+        } else {
+          // Delayed lock
+          timeoutId = setTimeout(() => {
+             document.body.style.display = 'none';
+             setIsLocked(true);
+          }, lockTime * 60 * 1000);
+        }
       } else {
-        // App is visible again. Show body. It will be on the lock screen because isLocked is true.
+        // App is visible again. Show body.
         document.body.style.display = 'block';
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
       }
     };
 
@@ -25,9 +50,15 @@ export const SecurityProvider = ({ children }) => {
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (timeoutId) clearTimeout(timeoutId);
       document.body.style.display = 'block'; // cleanup
     };
-  }, []);
+  }, [lockTime]);
+
+  const updateLockTime = (minutes) => {
+      setLockTime(minutes);
+      localStorage.setItem("autoLockTime", minutes.toString());
+  };
 
   useEffect(() => {
      // If user logs out, reset lock
@@ -61,7 +92,9 @@ export const SecurityProvider = ({ children }) => {
   const value = {
     isLocked,
     setLocked,
-    unlock
+    unlock,
+    lockTime,
+    updateLockTime
   };
 
   return (

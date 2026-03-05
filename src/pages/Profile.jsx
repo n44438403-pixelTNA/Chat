@@ -3,12 +3,14 @@ import { useParams, useNavigate } from "react-router-dom";
 import { db, auth } from "../firebase";
 import { doc, getDoc, updateDoc } from "firebase/firestore";
 import { useAuth } from "../context/AuthContext";
+import { useSecurity } from "../context/SecurityContext";
 import { updateEmail, updatePassword, updateProfile as updateAuthProfile } from "firebase/auth";
 
 const Profile = () => {
   const { userId } = useParams();
   const navigate = useNavigate();
   const { currentUser } = useAuth();
+  const { lockTime, updateLockTime } = useSecurity();
   const [profileUser, setProfileUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -178,6 +180,25 @@ const Profile = () => {
                         className="w-full px-3 py-2 border rounded focus:ring-1 focus:ring-blue-600 focus:outline-none"
                         minLength="6"
                     />
+                </div>
+
+                <hr className="my-2" />
+                <h3 className="font-semibold text-gray-800">App Security</h3>
+
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Auto-Lock Time</label>
+                    <select
+                        value={lockTime}
+                        onChange={(e) => updateLockTime(Number(e.target.value))}
+                        className="w-full px-3 py-2 border rounded focus:ring-1 focus:ring-blue-600 focus:outline-none bg-white"
+                    >
+                        <option value={0}>Instant (Default)</option>
+                        <option value={5}>5 Minutes</option>
+                        <option value={10}>10 Minutes</option>
+                        <option value={30}>30 Minutes</option>
+                        <option value={-1}>Never</option>
+                    </select>
+                    <p className="text-xs text-gray-500 mt-1">App will lock when left in the background for this duration.</p>
                 </div>
 
                 <div className="flex gap-2 mt-4">
