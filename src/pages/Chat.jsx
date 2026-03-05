@@ -29,6 +29,7 @@ const Chat = () => {
   const [otherUser, setOtherUser] = useState(null);
   const [presence, setPresence] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
+  const [deleteModal, setDeleteModal] = useState(null); // stores the msg object to be deleted
   const navigate = useNavigate();
   const bottomRef = useRef(null);
 
@@ -86,6 +87,11 @@ const Chat = () => {
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
         const msgTime = data.createdAt ? data.createdAt.toMillis() : now;
+
+        // Skip if message was deleted for me
+        if (data.deletedFor && data.deletedFor.includes(currentUser.uid)) {
+          return;
+        }
 
         // Check if message is older than 24 hours
         if (now - msgTime > twentyFourHours && !data.saved) {
@@ -184,9 +190,31 @@ const Chat = () => {
       await updateDoc(msgRef, { saved: !currentStatus });
   };
 
-  const deleteMessage = async (msgId) => {
-      const msgRef = doc(db, "chats", chatId, "messages", msgId);
+  const handleDeleteForMe = async () => {
+    if (!deleteModal) return;
+    const msgRef = doc(db, "chats", chatId, "messages", deleteModal.id);
+    const msgData = deleteModal;
+
+    // Add currentUser.uid to deletedFor array
+    const updatedDeletedFor = msgData.deletedFor ? [...msgData.deletedFor, currentUser.uid] : [currentUser.uid];
+
+    try {
+      await updateDoc(msgRef, { deletedFor: updatedDeletedFor });
+    } catch (err) {
+      console.error("Error deleting for me:", err);
+    }
+    setDeleteModal(null);
+  };
+
+  const handleDeleteForEveryone = async () => {
+    if (!deleteModal) return;
+    const msgRef = doc(db, "chats", chatId, "messages", deleteModal.id);
+    try {
       await deleteDoc(msgRef);
+    } catch (err) {
+      console.error("Error deleting for everyone:", err);
+    }
+    setDeleteModal(null);
   };
 
   return (
@@ -258,16 +286,14 @@ const Chat = () => {
                                  {msg.saved ? "★ Saved" : "☆"}
                              </button>
 
-                             {/* Delete Button (Sender only) */}
-                             {isMe && (
-                                 <button 
-                                    onClick={() => deleteMessage(msg.id)}
-                                    className="text-xs text-red-300 hover:text-red-100"
-                                    title="Delete for everyone"
-                                 >
-                                     🗑
-                                 </button>
-                             )}
+                             {/* Delete Button */}
+                             <button
+                                onClick={() => setDeleteModal(msg)}
+                                className={`text-xs ${isMe ? "text-red-300 hover:text-red-100" : "text-gray-400 hover:text-red-400"} opacity-0 group-hover:opacity-100 transition-opacity`}
+                                title="Delete"
+                             >
+                                 🗑
+                             </button>
 
                         </div>
 
@@ -301,6 +327,37 @@ const Chat = () => {
                 <span className="text-gray-600 text-xs">{replyingTo.text}</span>
             </div>
             <button onClick={() => setReplyingTo(null)} className="text-gray-500 hover:text-gray-800 font-bold p-1">✕</button>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-lg p-6 w-80 shadow-xl flex flex-col items-center">
+            <h3 className="text-lg font-bold mb-4">Delete Message?</h3>
+            <div className="flex flex-col gap-2 w-full">
+              <button
+                onClick={handleDeleteForMe}
+                className="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 py-2 rounded font-semibold transition-colors"
+              >
+                Delete for me
+              </button>
+              {deleteModal.senderId === currentUser.uid && (
+                <button
+                  onClick={handleDeleteForEveryone}
+                  className="w-full bg-red-500 hover:bg-red-600 text-white py-2 rounded font-semibold transition-colors"
+                >
+                  Delete for everyone
+                </button>
+              )}
+              <button
+                onClick={() => setDeleteModal(null)}
+                className="w-full mt-2 text-gray-500 hover:text-gray-800 py-2 rounded font-semibold transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

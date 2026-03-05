@@ -1,8 +1,49 @@
 import React, { useEffect, useState } from "react";
-import { db } from "../firebase";
+import { db, rtdb } from "../firebase";
 import { collection, getDocs, query, where } from "firebase/firestore";
+import { ref as rtdbRef, onValue } from "firebase/database";
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+
+const UserListItem = ({ user }) => {
+  const [presence, setPresence] = useState(null);
+
+  useEffect(() => {
+    const userStatusRef = rtdbRef(rtdb, `/status/${user.uid}`);
+    const unsubscribePresence = onValue(userStatusRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setPresence(snapshot.val());
+      }
+    });
+
+    return () => {
+      unsubscribePresence();
+    };
+  }, [user.uid]);
+
+  return (
+    <li className="border-b last:border-b-0">
+      <Link to={`/chat/${user.uid}`} className="block hover:bg-gray-50 p-4 flex items-center">
+        <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-bold mr-3 relative">
+          {user.displayName ? user.displayName.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase()}
+          {presence && presence.state === "online" && (
+            <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full bg-green-500 ring-2 ring-white" />
+          )}
+        </div>
+        <div>
+          <p className="font-semibold text-gray-800">{user.displayName || user.email}</p>
+          <p className="text-sm text-gray-500">
+            {presence && presence.state === "online"
+              ? "Online"
+              : presence && presence.last_changed
+              ? `Last seen: ${new Date(presence.last_changed).toLocaleString()}`
+              : "Tap to chat"}
+          </p>
+        </div>
+      </Link>
+    </li>
+  );
+};
 
 const Home = () => {
   const [users, setUsers] = useState([]);
@@ -41,17 +82,7 @@ const Home = () => {
           ) : (
             <ul>
               {users.map((user) => (
-                <li key={user.uid} className="border-b last:border-b-0">
-                  <Link to={`/chat/${user.uid}`} className="block hover:bg-gray-50 p-4 flex items-center">
-                    <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 font-bold mr-3">
-                      {user.displayName ? user.displayName.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-800">{user.displayName || user.email}</p>
-                      <p className="text-sm text-gray-500">Tap to chat</p>
-                    </div>
-                  </Link>
-                </li>
+                <UserListItem key={user.uid} user={user} />
               ))}
             </ul>
           )}
