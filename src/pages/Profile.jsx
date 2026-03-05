@@ -204,16 +204,20 @@ const Profile = () => {
                 <h2 className="text-2xl font-bold text-gray-800 mb-1">{profileUser.displayName || "Unknown User"}</h2>
                 <p className="text-gray-500 text-sm mb-6">{profileUser.email}</p>
 
-                <div className="w-full bg-gray-50 rounded-lg p-4 border border-gray-200">
+                <div className="w-full bg-gray-50 rounded-lg p-4 border border-gray-200 mt-4">
                     <h3 className="text-lg font-semibold text-gray-700 mb-3 border-b pb-2">Chat Stats</h3>
-                    <div className="grid grid-cols-2 gap-4 text-center">
-                        <div className="bg-white p-3 rounded shadow-sm border border-gray-100">
-                            <p className="text-sm text-gray-500 uppercase tracking-wide">Messages</p>
-                            <p className="text-2xl font-bold text-blue-600">{profileUser.messageCount || 0}</p>
+                    <div className="grid grid-cols-3 gap-3 text-center">
+                        <div className="bg-white p-2 rounded shadow-sm border border-gray-100">
+                            <p className="text-xs text-gray-500 uppercase tracking-wide">Sent</p>
+                            <p className="text-xl font-bold text-blue-600">{profileUser.messageCount || 0}</p>
                         </div>
-                        <div className="bg-white p-3 rounded shadow-sm border border-gray-100">
-                            <p className="text-sm text-gray-500 uppercase tracking-wide">Words Sent</p>
-                            <p className="text-2xl font-bold text-green-600">{profileUser.wordCount || 0}</p>
+                        <div className="bg-white p-2 rounded shadow-sm border border-gray-100">
+                            <p className="text-xs text-gray-500 uppercase tracking-wide">Received</p>
+                            <p className="text-xl font-bold text-purple-600">{profileUser.messagesReceived || 0}</p>
+                        </div>
+                        <div className="bg-white p-2 rounded shadow-sm border border-gray-100">
+                            <p className="text-xs text-gray-500 uppercase tracking-wide">Words</p>
+                            <p className="text-xl font-bold text-green-600">{profileUser.wordCount || 0}</p>
                         </div>
                     </div>
                 </div>
