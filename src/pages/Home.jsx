@@ -47,7 +47,7 @@ const UserListItem = ({ user }) => {
 
 const Home = () => {
   const [users, setUsers] = useState([]);
-  const { currentUser, logout } = useAuth();
+  const { currentUser, logout, isAdmin } = useAuth();
 
   useEffect(() => {
     const fetchUsers = async () => {
@@ -73,7 +73,12 @@ const Home = () => {
     <div className="min-h-screen bg-gray-100">
       <header className="bg-blue-600 p-4 text-white flex justify-between items-center shadow-md">
         <h1 className="text-xl font-bold">Chats</h1>
-        <button onClick={logout} className="bg-red-500 px-4 py-2 rounded text-sm hover:bg-red-600">Logout</button>
+        <div className="flex gap-2">
+          {isAdmin && (
+            <Link to="/settings" className="bg-blue-700 px-4 py-2 rounded text-sm hover:bg-blue-800 transition-colors">Settings</Link>
+          )}
+          <button onClick={logout} className="bg-red-500 px-4 py-2 rounded text-sm hover:bg-red-600 transition-colors">Logout</button>
+        </div>
       </header>
       <main className="p-4">
         <div className="bg-white rounded-lg shadow overflow-hidden max-w-2xl mx-auto">

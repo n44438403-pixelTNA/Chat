@@ -6,7 +6,7 @@ import {
   signOut,
   onAuthStateChanged,
 } from "firebase/auth";
-import { setDoc, doc } from "firebase/firestore";
+import { setDoc, doc, getDoc } from "firebase/firestore";
 import { ref, onValue, onDisconnect, set, serverTimestamp } from "firebase/database";
 
 export const AuthContext = createContext();
@@ -15,6 +15,7 @@ export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const signup = async (email, password, displayName) => {
@@ -47,11 +48,27 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     let connectedRefUnsubscribe;
 
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setCurrentUser(user);
-      setLoading(false);
 
       if (user) {
+        // Check admin status
+        if (user.email === "nadimanwar794@gmail.com") {
+          setIsAdmin(true);
+        } else {
+          try {
+            const userDoc = await getDoc(doc(db, "users", user.uid));
+            if (userDoc.exists() && userDoc.data().isAdmin) {
+              setIsAdmin(true);
+            } else {
+              setIsAdmin(false);
+            }
+          } catch (e) {
+            console.error("Error fetching admin status:", e);
+            setIsAdmin(false);
+          }
+        }
+
         const userStatusDatabaseRef = ref(rtdb, '/status/' + user.uid);
         const isOfflineForDatabase = {
           state: 'offline',
@@ -70,7 +87,10 @@ export const AuthProvider = ({ children }) => {
             });
           }
         });
+      } else {
+        setIsAdmin(false);
       }
+      setLoading(false);
     });
 
     return () => {
@@ -83,6 +103,7 @@ export const AuthProvider = ({ children }) => {
 
   const value = {
     currentUser,
+    isAdmin,
     signup,
     login,
     logout,

