@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { db } from "../firebase";
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, collection, getDocs, Timestamp } from "firebase/firestore";
 import { useAuth } from "../context/AuthContext";
 import { useNavigate } from "react-router-dom";
 
@@ -67,6 +67,31 @@ const Settings = () => {
     } catch (err) {
       console.error("Error saving settings:", err);
       alert("Failed to save settings.");
+    }
+    setLoading(false);
+  };
+
+  const deleteUser = async (userId, email) => {
+    if (email === "nadimanwar794@gmail.com") {
+        alert("Cannot delete the master admin.");
+        return;
+    }
+
+    if (!window.confirm(`Are you sure you want to delete ${email}? They will be permanently deleted after 90 days.`)) {
+        return;
+    }
+
+    setLoading(true);
+    try {
+      const now = Timestamp.now();
+      await updateDoc(doc(db, "users", userId), {
+        deletedAt: now
+      });
+      setUsers(users.map(u => u.id === userId ? { ...u, deletedAt: now } : u));
+      alert("User has been scheduled for deletion.");
+    } catch (err) {
+      console.error("Error deleting user:", err);
+      alert("Failed to delete user.");
     }
     setLoading(false);
   };
@@ -150,28 +175,50 @@ const Settings = () => {
                 <tr className="bg-gray-50 text-left text-sm text-gray-600">
                   <th className="py-2 px-4 font-semibold">User</th>
                   <th className="py-2 px-4 font-semibold">Email</th>
-                  <th className="py-2 px-4 font-semibold">Admin Status</th>
+                  <th className="py-2 px-4 font-semibold">Status</th>
+                  <th className="py-2 px-4 font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {users.map(user => (
-                  <tr key={user.id}>
+                {users.map(user => {
+                  const isMaster = user.email === "nadimanwar794@gmail.com";
+                  const isDeleted = !!user.deletedAt;
+
+                  let statusText = "Active";
+                  if (isDeleted) {
+                     statusText = `Scheduled for Deletion (${new Date(user.deletedAt.toMillis()).toLocaleDateString()})`;
+                  }
+
+                  return (
+                  <tr key={user.id} className={isDeleted ? "opacity-50" : ""}>
                     <td className="py-3 px-4">{user.displayName || "Unknown"}</td>
                     <td className="py-3 px-4">{user.email}</td>
-                    <td className="py-3 px-4">
-                      {user.email === "nadimanwar794@gmail.com" ? (
+                    <td className="py-3 px-4 text-xs font-semibold">{statusText}</td>
+                    <td className="py-3 px-4 flex gap-2 items-center">
+                      {isMaster ? (
                           <span className="text-gray-500 font-bold italic">Master Admin</span>
                       ) : (
-                        <button
-                            onClick={() => toggleAdminStatus(user.id, user.isAdmin, user.email)}
-                            className={`text-xs px-3 py-1 rounded font-bold ${user.isAdmin ? "bg-green-100 text-green-700 hover:bg-green-200" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
-                        >
-                            {user.isAdmin ? "Admin (Revoke)" : "Make Admin"}
-                        </button>
+                        <>
+                            <button
+                                onClick={() => toggleAdminStatus(user.id, user.isAdmin, user.email)}
+                                disabled={isDeleted}
+                                className={`text-xs px-3 py-1 rounded font-bold ${user.isAdmin ? "bg-green-100 text-green-700 hover:bg-green-200" : "bg-gray-100 text-gray-700 hover:bg-gray-200"} disabled:opacity-50`}
+                            >
+                                {user.isAdmin ? "Admin (Revoke)" : "Make Admin"}
+                            </button>
+                            {!isDeleted && (
+                                <button
+                                    onClick={() => deleteUser(user.id, user.email)}
+                                    className="text-xs px-3 py-1 rounded font-bold bg-red-100 text-red-700 hover:bg-red-200"
+                                >
+                                    Delete
+                                </button>
+                            )}
+                        </>
                       )}
                     </td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>

@@ -6,7 +6,7 @@ import {
   signOut,
   onAuthStateChanged,
 } from "firebase/auth";
-import { setDoc, doc, getDoc } from "firebase/firestore";
+import { setDoc, doc, getDoc, deleteDoc } from "firebase/firestore";
 import { ref, onValue, onDisconnect, set, serverTimestamp } from "firebase/database";
 
 export const AuthContext = createContext();
@@ -49,25 +49,51 @@ export const AuthProvider = ({ children }) => {
     let connectedRefUnsubscribe;
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
-
       if (user) {
-        // Check admin status
-        if (user.email === "nadimanwar794@gmail.com") {
-          setIsAdmin(true);
-        } else {
-          try {
+        try {
+            // Check if user is soft-deleted
             const userDoc = await getDoc(doc(db, "users", user.uid));
-            if (userDoc.exists() && userDoc.data().isAdmin) {
+            if (userDoc.exists()) {
+                const data = userDoc.data();
+                if (data.deletedAt) {
+                    const deletedAtMs = data.deletedAt.toMillis();
+                    const nowMs = Date.now();
+                    const daysSinceDeletion = (nowMs - deletedAtMs) / (1000 * 60 * 60 * 24);
+
+                    if (daysSinceDeletion >= 90) {
+                        // Permanently delete Firestore doc (Authentication deletion requires admin SDK or recent re-auth, so we just sign them out after cleaning DB)
+                        await deleteDoc(doc(db, "users", user.uid));
+                        await signOut(auth);
+                        setCurrentUser(null);
+                        setLoading(false);
+                        alert("Your account has been permanently deleted.");
+                        return;
+                    } else {
+                        await signOut(auth);
+                        setCurrentUser(null);
+                        setLoading(false);
+                        alert(`Your account is scheduled for deletion. It will be permanently deleted in ${Math.ceil(90 - daysSinceDeletion)} days.`);
+                        return;
+                    }
+                }
+            }
+
+            // Check admin status
+            if (user.email === "nadimanwar794@gmail.com") {
               setIsAdmin(true);
             } else {
-              setIsAdmin(false);
+              if (userDoc.exists() && userDoc.data().isAdmin) {
+                setIsAdmin(true);
+              } else {
+                setIsAdmin(false);
+              }
             }
-          } catch (e) {
-            console.error("Error fetching admin status:", e);
+        } catch (e) {
+            console.error("Error during auth state check:", e);
             setIsAdmin(false);
-          }
         }
+
+        setCurrentUser(user);
 
         const userStatusDatabaseRef = ref(rtdb, '/status/' + user.uid);
         const isOfflineForDatabase = {

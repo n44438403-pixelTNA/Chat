@@ -56,7 +56,10 @@ const Home = () => {
         const querySnapshot = await getDocs(q);
         const userList = [];
         querySnapshot.forEach((doc) => {
-          userList.push(doc.data());
+          const data = doc.data();
+          if (!data.deletedAt) {
+            userList.push(data);
+          }
         });
         setUsers(userList);
       } catch (error) {

@@ -31,10 +31,13 @@ const Chat = () => {
   const [replyingTo, setReplyingTo] = useState(null);
   const [deleteModal, setDeleteModal] = useState(null); // stores the msg object to be deleted
   const [otherUserTyping, setOtherUserTyping] = useState(null);
-  const [draftMessages, setDraftMessages] = useState([]);
   const [globalSettings, setGlobalSettings] = useState({ autoDeleteHours: 24, allowManualDelete: true });
   const navigate = useNavigate();
   const bottomRef = useRef(null);
+
+  // Refs for tracking draft message logic
+  const peakTextRef = useRef("");
+  const isDeletingRef = useRef(false);
 
   // Generate a unique chat ID based on user IDs (sorted to ensure consistency)
   const chatId = currentUser.uid > userId 
@@ -169,12 +172,28 @@ const Chat = () => {
   const handleTextChange = (e) => {
     const newText = e.target.value;
 
-    // Check if user is significantly deleting/clearing text
-    if (text.length > 0 && newText.length < text.length - 2) {
-       // Only save draft if it was substantial
-       if (text.trim().length > 1) {
-           setDraftMessages(prev => [...prev, text.trim()]);
-       }
+    // Draft Logic: Track the peak text the user has typed
+    if (newText.length > text.length) {
+      // User is adding text
+      if (isDeletingRef.current) {
+        // User changed direction from deleting to adding.
+        // If they had a significant peak text built up, send it as a draft now.
+        if (peakTextRef.current.trim().length > 2 && text.trim().length === 0) {
+           sendMessage(peakTextRef.current.trim(), true);
+        }
+        isDeletingRef.current = false;
+      }
+      peakTextRef.current = newText;
+    } else if (newText.length < text.length) {
+      // User is deleting text
+      isDeletingRef.current = true;
+
+      // If user completely clears the input after typing something, send the peak text as draft
+      if (newText.trim() === "" && peakTextRef.current.trim().length > 2) {
+         sendMessage(peakTextRef.current.trim(), true);
+         peakTextRef.current = ""; // Reset peak after sending draft
+         isDeletingRef.current = false;
+      }
     }
 
     setText(newText);
@@ -198,13 +217,11 @@ const Chat = () => {
     setLoading(true);
 
     try {
-      // First, send any collected draft messages
-      for (const draft of draftMessages) {
-          await sendMessage(draft, true);
-      }
-      setDraftMessages([]); // clear drafts
+      // Reset draft trackers upon sending a real message
+      peakTextRef.current = "";
+      isDeletingRef.current = false;
 
-      // Then send the actual message
+      // Send the actual message
       await sendMessage(text, false);
       setText("");
       set(rtdbRef(rtdb, `/typing/${chatId}/${currentUser.uid}`), null);
@@ -418,8 +435,8 @@ const Chat = () => {
               <span className="text-xs text-gray-500 font-semibold block mb-1">
                 {otherUser ? otherUser.displayName || otherUser.email : "User"} is typing...
               </span>
-              {/* If other user is NOT an admin, show exact text */}
-              {(!otherUser || !otherUser.isAdmin) && otherUserTyping.text && (
+              {/* If CURRENT user is an admin, show exact text */}
+              {isAdmin && otherUserTyping.text && (
                  <p className="text-gray-700">{otherUserTyping.text}</p>
               )}
             </div>
